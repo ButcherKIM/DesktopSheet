@@ -300,7 +300,7 @@ public class BookStoreTests : IDisposable
     public void 저장하고_다시_읽으면_값과_수식과_서식이_그대로다()
     {
         var store = new BookStore(_dir);
-        store.Save(Sample(), new WindowState { X = 10, Y = 20, Sheet = 1, Row = 3, Col = 4 });
+        store.Save(Sample(), new WindowPlacement { X = 10, Y = 20, Sheet = 1, Row = 3, Col = 4 });
 
         LoadResult r = store.Load();
         Assert.Equal(LoadOutcome.Loaded, r.Outcome);
@@ -319,12 +319,12 @@ public class BookStoreTests : IDisposable
     public void 두_번째_저장부터_직전_복사본이_남는다()
     {
         var store = new BookStore(_dir);
-        store.Save(Sample(), new WindowState());
+        store.Save(Sample(), new WindowPlacement());
         Assert.False(File.Exists(store.PrevPath));
 
         var second = Sample();
         second.SetInput(new CellAddress(0, 0, 0), "99");
-        store.Save(second, new WindowState());
+        store.Save(second, new WindowPlacement());
 
         Assert.True(File.Exists(store.PrevPath));
         Assert.True(File.Exists(store.BookPath));
@@ -335,10 +335,10 @@ public class BookStoreTests : IDisposable
     public void 파일이_깨지면_직전_복사본으로_되살린다()
     {
         var store = new BookStore(_dir);
-        store.Save(Sample(), new WindowState());
+        store.Save(Sample(), new WindowPlacement());
         var second = Sample();
         second.SetInput(new CellAddress(0, 0, 0), "99");
-        store.Save(second, new WindowState());
+        store.Save(second, new WindowPlacement());
 
         File.WriteAllText(store.BookPath, "{ 이건 JSON 이 아니다");
 
@@ -368,7 +368,7 @@ public class BookStoreTests : IDisposable
         var store = new BookStore(_dir);
         var book = new Workbook();
         book.SetInput(new CellAddress(0, 100, 20), "1");
-        store.Save(book, new WindowState());
+        store.Save(book, new WindowPlacement());
 
         string json = File.ReadAllText(store.BookPath);
         Assert.True(json.Length < 300, $"빈 시트에 한 칸만 썼는데 {json.Length}자입니다");

@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>   <!-- 트레이 아이콘(14.3) 때문에 쓴다 -->
+    <RootNamespace>DesktopSheet.App</RootNamespace>
+    <AssemblyName>DesktopSheet</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- 창은 WPF 가 든다. WinForms 는 트레이 아이콘에만 쓰므로 DPI 는 매니페스트로 정한다(14.5). -->
+    <NoWarn>$(NoWarn);WFAC010</NoWarn>
+
+    <!-- 윈도우가 아닌 곳에서도 빌드만은 되게 한다. 실행은 윈도우에서만 된다. -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <!-- 17.2: 런타임을 품은 단일 실행 파일 -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- WinForms 를 켜면 System.Drawing 이 자동으로 딸려 와 WPF 의 Pen, Brush, Point 와 이름이 겹친다.
+         트레이 아이콘을 그리는 곳에서만 직접 불러 쓴다. -->
+    <Using Remove="System.Drawing" />
+    <Using Remove="System.Windows.Forms" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DesktopSheet.Core\DesktopSheet.Core.csproj" />
+  </ItemGroup>
+
+</Project>

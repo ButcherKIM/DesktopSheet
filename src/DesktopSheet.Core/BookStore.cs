@@ -8,7 +8,7 @@ using System.Text.Json.Serialization;
 namespace DesktopSheet.Core;
 
 /// <summary>13.1 이 파일에 담는 창 상태. 14.6 이 이것으로 창을 되살린다.</summary>
-public sealed class WindowState
+public sealed class WindowPlacement
 {
     /// <summary>아직 자리를 잡은 적이 없으면 값이 없다. 그때는 화면 가운데에 띄운다(14.6).</summary>
     public double? X { get; set; }
@@ -22,7 +22,7 @@ public sealed class WindowState
 
 public enum LoadOutcome { Loaded, RestoredFromPrev, StartedEmpty }
 
-public sealed record LoadResult(Workbook Book, WindowState Window, LoadOutcome Outcome, string? BrokenFile);
+public sealed record LoadResult(Workbook Book, WindowPlacement Window, LoadOutcome Outcome, string? BrokenFile);
 
 /// <summary>
 /// 사양서 13장. 파일 하나에 다섯 시트를 담고, 임시 파일에 쓴 뒤 이름을 바꿔 넣는다.
@@ -56,7 +56,7 @@ public sealed class BookStore(string directory)
                 $"book.broken-{DateTime.Now:yyyyMMdd-HHmm}.json");
             try { File.Move(BookPath, broken, overwrite: true); } catch (IOException) { broken = null; }
         }
-        return new LoadResult(new Workbook(), new WindowState(), LoadOutcome.StartedEmpty, broken);
+        return new LoadResult(new Workbook(), new WindowPlacement(), LoadOutcome.StartedEmpty, broken);
     }
 
     private bool TryRead(string path, out LoadResult? result)
@@ -67,7 +67,7 @@ public sealed class BookStore(string directory)
         {
             BookDto? dto = JsonSerializer.Deserialize<BookDto>(File.ReadAllText(path), Options);
             if (dto?.Sheets is null || dto.Sheets.Count == 0) return false;
-            result = new LoadResult(ToWorkbook(dto), dto.Window ?? new WindowState(), LoadOutcome.Loaded, null);
+            result = new LoadResult(ToWorkbook(dto), dto.Window ?? new WindowPlacement(), LoadOutcome.Loaded, null);
             return true;
         }
         catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException)
@@ -77,7 +77,7 @@ public sealed class BookStore(string directory)
     }
 
     /// <summary>13.3. 임시 파일에 전부 쓴 뒤 이름을 바꿔 넣는다. 반쯤 쓰이다 만 파일이 남지 않는다.</summary>
-    public void Save(Workbook book, WindowState window)
+    public void Save(Workbook book, WindowPlacement window)
     {
         System.IO.Directory.CreateDirectory(Directory);
         File.WriteAllText(TempPath, JsonSerializer.Serialize(ToDto(book, window), Options));
@@ -86,7 +86,7 @@ public sealed class BookStore(string directory)
         else File.Move(TempPath, BookPath);
     }
 
-    internal static BookDto ToDto(Workbook book, WindowState window)
+    internal static BookDto ToDto(Workbook book, WindowPlacement window)
     {
         var dto = new BookDto { Version = 1, Window = window, Sheets = new List<SheetDto>() };
         foreach (Sheet sheet in book.Sheets)
@@ -141,7 +141,7 @@ public sealed class BookStore(string directory)
     internal sealed class BookDto
     {
         [JsonPropertyName("version")] public int Version { get; set; }
-        [JsonPropertyName("window")]  public WindowState? Window { get; set; }
+        [JsonPropertyName("window")]  public WindowPlacement? Window { get; set; }
         [JsonPropertyName("sheets")]  public List<SheetDto>? Sheets { get; set; }
     }
 
