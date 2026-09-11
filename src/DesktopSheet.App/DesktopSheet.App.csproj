@@ -23,7 +23,8 @@
     <SelfContained>true</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
-    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <!-- 압축은 런타임을 품을 때만 쓸 수 있다. 런타임을 빼고 낼 때도 명령이 그대로 돌아가게 조건을 건다. -->
+    <EnableCompressionInSingleFile Condition="'$(SelfContained)' != 'false'">true</EnableCompressionInSingleFile>
     <DebugType>none</DebugType>
   </PropertyGroup>
 
