@@ -25,6 +25,7 @@ public partial class MainWindow : Window
     private string _copyClipboardText = "";
     private CellAddress? _tipCell;
     private bool _exiting;
+    private int? _renamingSheet;
 
     public MainWindow(BookStore store, LoadResult loaded)
     {
@@ -78,6 +79,8 @@ public partial class MainWindow : Window
         for (int i = 0; i < _book.Sheets.Count; i++)
         {
             int index = i;
+            if (_renamingSheet == index) { TabPanel.Children.Add(RenameBox(index)); continue; }
+
             var tab = new Button
             {
                 Content = _book.Sheets[i].Name,
@@ -89,22 +92,104 @@ public partial class MainWindow : Window
                 Foreground = PaletteBrushes.Of(i == SheetIndex ? "#15181D" : "#586070"),
                 FontSize = 11,
                 Focusable = false,
+                ContextMenu = SheetMenu(index),
             };
             tab.Click += (_, _) => { Sel.SetSheet(index); GridView.Raise(); GridView.Focus(); };
             TabPanel.Children.Add(tab);
         }
 
-        if (_book.Sheets.Count < Workbook.MaxSheets)
+        if (_book.Sheets.Count < Workbook.MaxSheets && _renamingSheet is null)
         {
             var add = new Button
             {
                 Content = "+", Padding = new Thickness(8, 0, 8, 0), FontSize = 11, Focusable = false,
                 BorderThickness = new Thickness(0), Background = PaletteBrushes.Of("#EFF1F4"),
                 Foreground = PaletteBrushes.Of("#586070"),
+                ToolTip = "시트 추가",
             };
             add.Click += (_, _) => { _book.AddSheet(); Touch(); BuildTabs(); };
             TabPanel.Children.Add(add);
         }
+    }
+
+    /// <summary>12.2 의 이름 변경과 삭제. 창에 대화상자를 띄우지 않으려고 탭 자리에서 바로 고친다.</summary>
+    private ContextMenu SheetMenu(int index)
+    {
+        var menu = new ContextMenu();
+
+        var rename = new MenuItem { Header = "이름 바꾸기" };
+        rename.Click += (_, _) => { _renamingSheet = index; BuildTabs(); };
+        menu.Items.Add(rename);
+
+        var remove = new MenuItem { Header = "시트 지우기", IsEnabled = _book.Sheets.Count > 1 };
+        remove.Click += (_, _) => RemoveSheet(index);
+        menu.Items.Add(remove);
+
+        return menu;
+    }
+
+    private TextBox RenameBox(int index)
+    {
+        var box = new TextBox
+        {
+            Text = _book.Sheets[index].Name,
+            Width = 90, FontSize = 11,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            BorderBrush = PaletteBrushes.Of("#0B48C8"), BorderThickness = new Thickness(1),
+        };
+        bool done = false;
+
+        void Finish(bool keep)
+        {
+            if (done) return;
+            done = true;
+            string name = box.Text.Trim();
+            _renamingSheet = null;
+            if (keep && name.Length > 0 && name != _book.Sheets[index].Name)
+            {
+                try { _book.RenameSheet(index, name); Touch(); }
+                catch (InvalidOperationException e) { ShowTabError(e.Message); }
+            }
+            BuildTabs();
+            GridView.Focus();
+        }
+
+        box.Loaded += (_, _) => { box.Focus(); box.SelectAll(); };
+        box.LostKeyboardFocus += (_, _) => Finish(keep: true);
+        box.PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key == Key.ImeProcessed) return;          // 10.2: 한글 조합은 입력기가 맡는다
+            if (e.Key == Key.Enter)  { Finish(keep: true);  e.Handled = true; }
+            if (e.Key == Key.Escape) { Finish(keep: false); e.Handled = true; }
+        };
+        return box;
+    }
+
+    private void ShowTabError(string message) =>
+        MessageBox.Show(this, message, "DesktopSheet", MessageBoxButton.OK, MessageBoxImage.Information);
+
+    /// <summary>
+    /// 시트를 지우면 그 안의 값이 사라지는데 되돌리기가 칸 단위라 이것만은 되살리지 못한다.
+    /// 그래서 값이 든 시트를 지울 때만 한 번 묻는다.
+    /// </summary>
+    private void RemoveSheet(int index)
+    {
+        bool hasValues = _book.Sheets[index].Cells.Any(c => !c.Value.IsEmpty);
+        if (hasValues)
+        {
+            var answer = MessageBox.Show(this,
+                $"시트 '{_book.Sheets[index].Name}' 을 지웁니다. 되돌리기로는 되살릴 수 없습니다.",
+                "DesktopSheet", MessageBoxButton.OKCancel, MessageBoxImage.Warning);
+            if (answer != MessageBoxResult.OK) return;
+        }
+
+        try { _book.RemoveSheet(index); }
+        catch (InvalidOperationException e) { ShowTabError(e.Message); return; }
+
+        Sel.SetSheet(Math.Clamp(SheetIndex, 0, _book.Sheets.Count - 1));
+        Touch();
+        BuildTabs();
+        GridView.Raise();
     }
 
     private void TabBar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -357,31 +442,12 @@ public partial class MainWindow : Window
                         if (valuesOnly)                                  // Ctrl+Shift+V: 결과를 값으로 굳힌다
                             raw = DelimitedText.CellText(_book, from);
                         else if (raw.StartsWith('='))
-                            raw = ShiftReferences(raw, row - r, col - c);
+                            raw = FormulaRewriter.Shift(raw, row - r, col - c);
 
                         _book.SetInput(to, raw);
                     }
 
         _undo.Push(step.Commit(_book));
-    }
-
-    /// <summary>10.3. 붙여넣을 때 상대 참조만 민다. 절대 참조는 고정이고 시트 밖으로 나가면 #REF! 다.</summary>
-    private static string ShiftReferences(string formula, int dRow, int dCol)
-    {
-        List<Token> tokens = Tokenizer.Scan(formula);
-        var sb = new System.Text.StringBuilder("=");
-        foreach (Token t in tokens)
-        {
-            if (t.Kind == TokenKind.End) break;
-            if (t.Kind == TokenKind.Ref && CellRef.TryParse(t.Lexeme, out CellRef r))
-            {
-                CellRef moved = r.Offset(dRow, dCol);
-                sb.Append(moved.IsValid ? moved.ToA1() : CellErrorText.Of(CellError.Reference));
-            }
-            else if (t.Kind == TokenKind.Text) sb.Append('"').Append(t.Lexeme.Replace("\"", "\"\"")).Append('"');
-            else sb.Append(t.Lexeme);
-        }
-        return sb.ToString();
     }
 
     // --- 툴팁 (9장) ---

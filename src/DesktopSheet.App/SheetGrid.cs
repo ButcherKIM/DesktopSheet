@@ -46,6 +46,7 @@ public sealed class SheetGrid : FrameworkElement
     public int TopRow { get; private set; }
     public int LeftCol { get; private set; }
 
+
     public event EventHandler? SelectionChanged;
     public event EventHandler? EditRequested;
 
@@ -209,17 +210,83 @@ public sealed class SheetGrid : FrameworkElement
     /// <summary>12.3. 스크롤바는 그리드 위에 겹쳐 그려 창 크기를 먹지 않는다.</summary>
     private void DrawScrollBars(DrawingContext dc)
     {
-        double trackH = ActualHeight - ColHeaderHeight;
-        double thumbH = Math.Max(20, trackH * VisibleRows / Sheet.Rows);
-        double posH = trackH * TopRow / Sheet.Rows;
-        dc.DrawRectangle(ScrollThumb, null,
-            new Rect(ActualWidth - ScrollBarWidth, ColHeaderHeight + posH, ScrollBarWidth, thumbH));
+        dc.DrawRectangle(ScrollThumb, null, VerticalThumb());
+        dc.DrawRectangle(ScrollThumb, null, HorizontalThumb());
+    }
 
-        double trackW = ActualWidth - RowHeaderWidth;
-        double thumbW = Math.Max(20, trackW * VisibleCols / Sheet.Cols);
-        double posW = trackW * LeftCol / Sheet.Cols;
-        dc.DrawRectangle(ScrollThumb, null,
-            new Rect(RowHeaderWidth + posW, ActualHeight - ScrollBarWidth, thumbW, ScrollBarWidth));
+    // 손잡이 자리를 한 곳에서 셈한다. 그리는 자리와 잡는 자리가 어긋나지 않게 하려는 것이다.
+    private double VerticalTrack => Math.Max(1, ActualHeight - ColHeaderHeight - ScrollBarWidth);
+    private double HorizontalTrack => Math.Max(1, ActualWidth - RowHeaderWidth - ScrollBarWidth);
+    private int MaxTopRow => Math.Max(0, Sheet.Rows - VisibleRows);
+    private int MaxLeftCol => Math.Max(0, Sheet.Cols - VisibleCols);
+
+    private Rect VerticalThumb()
+    {
+        double height = Math.Max(20, VerticalTrack * VisibleRows / Sheet.Rows);
+        double span = Math.Max(0, VerticalTrack - height);
+        double top = MaxTopRow == 0 ? 0 : span * TopRow / MaxTopRow;
+        return new Rect(ActualWidth - ScrollBarWidth, ColHeaderHeight + top, ScrollBarWidth, height);
+    }
+
+    private Rect HorizontalThumb()
+    {
+        double width = Math.Max(20, HorizontalTrack * VisibleCols / Sheet.Cols);
+        double span = Math.Max(0, HorizontalTrack - width);
+        double left = MaxLeftCol == 0 ? 0 : span * LeftCol / MaxLeftCol;
+        return new Rect(RowHeaderWidth + left, ActualHeight - ScrollBarWidth, width, ScrollBarWidth);
+    }
+
+    private enum ScrollDrag { None, Vertical, Horizontal }
+    private ScrollDrag _scrollDrag;
+    private double _scrollGrabOffset;
+
+    /// <summary>스크롤바를 눌렀으면 참을 돌려준다. 손잡이면 끌기가 시작되고 빈 곳이면 한 화면씩 넘긴다.</summary>
+    private bool TryStartScroll(Point p)
+    {
+        if (p.X >= ActualWidth - ScrollBarWidth && p.Y >= ColHeaderHeight)
+        {
+            Rect thumb = VerticalThumb();
+            if (p.Y >= thumb.Top && p.Y <= thumb.Bottom)
+            {
+                _scrollDrag = ScrollDrag.Vertical;
+                _scrollGrabOffset = p.Y - thumb.Top;
+                CaptureMouse();
+            }
+            else ScrollBy(p.Y < thumb.Top ? -VisibleRows : VisibleRows, 0);
+            return true;
+        }
+
+        if (p.Y >= ActualHeight - ScrollBarWidth && p.X >= RowHeaderWidth)
+        {
+            Rect thumb = HorizontalThumb();
+            if (p.X >= thumb.Left && p.X <= thumb.Right)
+            {
+                _scrollDrag = ScrollDrag.Horizontal;
+                _scrollGrabOffset = p.X - thumb.Left;
+                CaptureMouse();
+            }
+            else ScrollBy(0, p.X < thumb.Left ? -VisibleCols : VisibleCols);
+            return true;
+        }
+
+        return false;
+    }
+
+    private void DragScroll(Point p)
+    {
+        if (_scrollDrag == ScrollDrag.Vertical)
+        {
+            double span = Math.Max(1, VerticalTrack - VerticalThumb().Height);
+            double at = p.Y - _scrollGrabOffset - ColHeaderHeight;
+            TopRow = (int)Math.Round(Math.Clamp(at / span, 0, 1) * MaxTopRow);
+        }
+        else
+        {
+            double span = Math.Max(1, HorizontalTrack - HorizontalThumb().Width);
+            double at = p.X - _scrollGrabOffset - RowHeaderWidth;
+            LeftCol = (int)Math.Round(Math.Clamp(at / span, 0, 1) * MaxLeftCol);
+        }
+        InvalidateVisual();
     }
 
     private static void DrawCentered(DrawingContext dc, string text, Rect rect, Brush brush)
@@ -245,6 +312,8 @@ public sealed class SheetGrid : FrameworkElement
 
         Point p = e.GetPosition(this);
         bool shift = (Keyboard.Modifiers & ModifierKeys.Shift) != 0;
+
+        if (TryStartScroll(p)) { e.Handled = true; return; }
 
         if (p.X < RowHeaderWidth && p.Y >= ColHeaderHeight)
         {
@@ -272,6 +341,7 @@ public sealed class SheetGrid : FrameworkElement
 
     protected override void OnMouseMove(MouseEventArgs e)
     {
+        if (_scrollDrag != ScrollDrag.None) { DragScroll(e.GetPosition(this)); return; }
         if (!_dragging) return;
         Point p = e.GetPosition(this);
         Selection.ExtendTo(RowAt(p.Y), ColAt(p.X));
@@ -280,6 +350,7 @@ public sealed class SheetGrid : FrameworkElement
 
     protected override void OnMouseLeftButtonUp(MouseButtonEventArgs e)
     {
+        if (_scrollDrag != ScrollDrag.None) { _scrollDrag = ScrollDrag.None; ReleaseMouseCapture(); return; }
         if (!_dragging) return;
         _dragging = false;
         ReleaseMouseCapture();

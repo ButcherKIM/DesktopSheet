@@ -87,6 +87,9 @@ public sealed class Workbook
         var sheet = new Sheet(name);
         _sheets.Add(sheet);
         _evaluators.Add(new Evaluator(new SheetScopedSource(this, _sheets.Count - 1)));
+
+        // 새 시트가 생기면 그 이름을 쓰던 식이 되살아날 수 있으므로 그래프를 다시 세운다.
+        if (_sheets.Count > 1) RebuildAll();
         return sheet;
     }
 
@@ -97,6 +100,79 @@ public sealed class Workbook
             string candidate = "Sheet" + n;
             if (!_sheets.Any(s => s.Name.Equals(candidate, StringComparison.OrdinalIgnoreCase))) return candidate;
         }
+    }
+
+    /// <summary>12.2. 이름을 바꾸면 그 이름을 쓰던 식도 함께 고친다.</summary>
+    public void RenameSheet(int index, string newName)
+    {
+        if (index < 0 || index >= _sheets.Count) throw new ArgumentOutOfRangeException(nameof(index));
+        newName = (newName ?? "").Trim();
+        if (newName.Length == 0) throw new ArgumentException("시트 이름이 비어 있습니다", nameof(newName));
+
+        string oldName = _sheets[index].Name;
+        if (string.Equals(oldName, newName, StringComparison.Ordinal)) return;
+        for (int i = 0; i < _sheets.Count; i++)
+            if (i != index && _sheets[i].Name.Equals(newName, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"시트 이름 {newName} 이 이미 있습니다");
+
+        _sheets[index].Name = newName;
+        foreach (Sheet sheet in _sheets)
+            foreach ((int _, Cell cell) in sheet.Cells)
+                if (cell.Raw.StartsWith('='))
+                    cell.Raw = FormulaRewriter.RenameSheet(cell.Raw, oldName, newName);
+
+        RebuildAll();
+    }
+
+    /// <summary>
+    /// 12.2. 시트를 지운다. 마지막 한 장은 남긴다.
+    /// 지워진 시트를 가리키던 식은 이름이 풀리지 않아 #REF! 가 된다(8.4).
+    /// </summary>
+    public void RemoveSheet(int index)
+    {
+        if (index < 0 || index >= _sheets.Count) throw new ArgumentOutOfRangeException(nameof(index));
+        if (_sheets.Count == 1) throw new InvalidOperationException("시트는 한 장은 남아야 합니다");
+
+        _sheets.RemoveAt(index);
+        _evaluators.RemoveAt(_evaluators.Count - 1);
+        for (int i = 0; i < _sheets.Count; i++) _evaluators[i] = new Evaluator(new SheetScopedSource(this, i));
+
+        RebuildAll();
+    }
+
+    /// <summary>
+    /// 시트가 빠지면 칸 번호가 통째로 밀려 그래프가 어긋난다. 그래서 그래프를 버리고 다시 세운 뒤 전부 셈한다.
+    /// 26,000칸이 상한이고 시트를 지우는 일은 드무니 통째로 다시 세워도 된다.
+    /// </summary>
+    private void RebuildAll()
+    {
+        Array.Clear(_dependents);
+        var seeds = new List<int>();
+
+        for (int i = 0; i < _sheets.Count; i++)
+            foreach ((int key, Cell cell) in _sheets[i].Cells)
+            {
+                cell.Precedents = Array.Empty<int>();
+                if (!cell.Raw.StartsWith('=')) continue;
+
+                int me = i * SheetStride + key;
+                try
+                {
+                    cell.Formula = Parser.Parse(cell.Raw);
+                    var pres = new HashSet<int>();
+                    CollectPrecedents(i, cell.Formula, pres);
+                    cell.Precedents = pres.ToArray();
+                    foreach (int pre in cell.Precedents) (_dependents[pre] ??= new List<int>()).Add(me);
+                }
+                catch (FormulaException e)
+                {
+                    cell.Formula = null;
+                    cell.Value = Value.Err(e.Error);
+                }
+                seeds.Add(me);
+            }
+
+        Recalculate(seeds);
     }
 
     public int IndexOf(string sheetName) =>
@@ -156,7 +232,7 @@ public sealed class Workbook
                 break;
         }
 
-        Recalculate(at);
+        Recalculate(new[] { Id(at) });
     }
 
     /// <summary>되돌리기가 쓸 수 있게 칸의 상태를 통째로 뜬다(10.5).</summary>
@@ -217,7 +293,7 @@ public sealed class Workbook
         cell.Formula = null;
         cell.Value = Value.Blank;
         ClearPrecedents(at, cell);
-        Recalculate(at);
+        Recalculate(new[] { Id(at) });
     }
 
     private void ClearPrecedents(CellAddress at, Cell cell)
@@ -266,14 +342,14 @@ public sealed class Workbook
     /// 8.6. 바뀐 칸과 그 뒤에 달린 칸만 모아 선행이 끝난 순서대로 셈한다.
     /// 칸 번호를 자리로 쓰는 배열 셋으로 훑으므로 해시를 타지 않고, 칸이 사슬로 이어져도 한 칸을 한 번씩만 건드린다.
     /// </summary>
-    private void Recalculate(CellAddress changed)
+    private void Recalculate(IReadOnlyList<int> seeds)
     {
         _epoch++;
         var dirty = new List<int>(64);
 
         // 1. 바뀐 칸에 달린 칸을 모은다. _stamp 가 이번 회차 번호면 이미 담은 칸이다.
         var stack = new Stack<int>();
-        stack.Push(Id(changed));
+        foreach (int seed in seeds) stack.Push(seed);
         while (stack.Count > 0)
         {
             int a = stack.Pop();
