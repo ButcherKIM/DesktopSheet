@@ -1,0 +1,10 @@
+# 빌드 결과물
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+*.user
+
+# 파이썬 검사기
+__pycache__/
+*.pyc
