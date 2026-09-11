@@ -159,6 +159,55 @@ public sealed class Workbook
         Recalculate(at);
     }
 
+    /// <summary>되돌리기가 쓸 수 있게 칸의 상태를 통째로 뜬다(10.5).</summary>
+    public CellSnapshot Snapshot(CellAddress at)
+    {
+        Cell? cell = FindCell(at);
+        return cell is null
+            ? new CellSnapshot("", "", null, null)
+            : new CellSnapshot(cell.Raw, cell.FormatCode, cell.Shade, cell.Ink);
+    }
+
+    /// <summary>뜬 상태를 그대로 되돌린다. 값을 먼저 넣고 서식을 덮는다 - 입력 인식이 붙인 서식을 지우기 위해서다.</summary>
+    public void Restore(CellAddress at, CellSnapshot snap)
+    {
+        SetInput(at, snap.Raw);
+        Cell cell = _sheets[at.Sheet].GetOrCreate(at.Row, at.Col);
+        cell.FormatCode = snap.FormatCode;
+        cell.Shade = snap.Shade;
+        cell.Ink = snap.Ink;
+    }
+
+    public Cell? FindCell(CellAddress a) =>
+        a.Sheet >= 0 && a.Sheet < _sheets.Count && Sheet.InRange(a.Row, a.Col)
+            ? _sheets[a.Sheet].Find(a.Row, a.Col) : null;
+
+    /// <summary>15.1 의 색 칠하기. 서식은 값과 따로 셀에 붙박여 있다(10.3).</summary>
+    public void SetShade(CellAddress at, string? paletteName)
+    {
+        _sheets[at.Sheet].GetOrCreate(at.Row, at.Col).Shade = paletteName;
+    }
+
+    public void SetInk(CellAddress at, string? paletteName)
+    {
+        _sheets[at.Sheet].GetOrCreate(at.Row, at.Col).Ink = paletteName;
+    }
+
+    public void SetFormat(CellAddress at, string formatCode)
+    {
+        _sheets[at.Sheet].GetOrCreate(at.Row, at.Col).FormatCode = formatCode ?? "";
+    }
+
+    /// <summary>15.5 의 서식 지우기. 값과 수식은 건드리지 않는다.</summary>
+    public void ClearFormat(CellAddress at)
+    {
+        Cell? cell = FindCell(at);
+        if (cell is null) return;
+        cell.Shade = null;
+        cell.Ink = null;
+        cell.FormatCode = "";
+    }
+
     /// <summary>10.3 의 Delete. 값과 수식만 지우고 서식은 남긴다.</summary>
     public void ClearValue(CellAddress at)
     {
@@ -285,10 +334,6 @@ public sealed class Workbook
         int sheet = id / SheetStride;
         return sheet < _sheets.Count ? _sheets[sheet].Find(id % SheetStride / Sheet.Cols, id % Sheet.Cols) : null;
     }
-
-    private Cell? FindCell(CellAddress a) =>
-        a.Sheet >= 0 && a.Sheet < _sheets.Count && Sheet.InRange(a.Row, a.Col)
-            ? _sheets[a.Sheet].Find(a.Row, a.Col) : null;
 
     /// <summary>시트 이름을 적지 않은 주소는 식이 있는 시트의 칸을 뜻한다.</summary>
     private sealed class SheetScopedSource(Workbook book, int sheet) : ICellSource
