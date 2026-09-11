@@ -46,6 +46,11 @@ public partial class MainWindow : Window
 
         Width = _windowState.Width;
         Height = _windowState.Height;
+        if (_windowState.X is null)                      // 자리를 잡은 적이 없으면 5열 20행이 보이는 크기로 연다
+        {
+            Width = 5 * SheetGrid.CellWidth + SheetGrid.RowHeaderWidth;
+            Height = 20 * SheetGrid.RowHeight + SheetGrid.ColHeaderHeight + 24;
+        }
         if (_windowState.X is { } x && _windowState.Y is { } y)
         {
             (double cx, double cy) = Win32.ClampToScreen(x, y, Width, Height);
@@ -206,8 +211,13 @@ public partial class MainWindow : Window
         CellAddress at = Sel.Cursor;
         Rect r = GridView.CellRect(at.Row, at.Col);
         Editor.Margin = new Thickness(r.Left, r.Top, 0, 0);
-        Editor.Width = r.Width;
+        // 장평을 걸었으면 편집기에도 같은 배율을 걸어야 편집으로 들어갈 때 글자가 튀지 않는다.
+        Editor.RenderTransform = SheetGrid.Squeeze == 1.0
+            ? Transform.Identity
+            : new ScaleTransform(SheetGrid.Squeeze, 1);
+        Editor.Width = r.Width / SheetGrid.Squeeze;
         Editor.Height = r.Height;
+        Editor.FontSize = SheetGrid.FontSize;
         Editor.Text = seed ?? _book.FindCell(at)?.Raw ?? "";
         Editor.Visibility = Visibility.Visible;
         Editor.Focus();

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Input;
@@ -13,13 +14,28 @@ namespace DesktopSheet.App;
 public sealed class SheetGrid : FrameworkElement
 {
     // 1장과 12.3 이 정한 치수. DPI 배율은 WPF 가 알아서 곱한다(14.5).
-    public const double CellWidth = 104;
-    public const double RowHeight = 20;
-    public const double RowHeaderWidth = 40;
-    public const double ColHeaderHeight = 20;
-    public const double CellPadding = 8;
     public const double FontSize = 16;          // 12pt = 96 DPI 에서 16px
     public const double ScrollBarWidth = 8;
+    public const double ColHeaderHeight = 20;
+    public const double RowHeight = 20;
+
+    /// <summary>장평. 글자를 가로로 누르는 비율이다. 1 이면 누르지 않는다.</summary>
+    public const double Squeeze = 1.0;
+
+    /// <summary>자간 보정(px). 음수면 글자 사이가 좁아진다. 글자 모양은 건드리지 않는다.</summary>
+    public const double Tracking = 0.0;
+
+    /// <summary>
+    /// 영문 한 자가 차지하는 가로 자리. 한글은 이것의 두 배다.
+    /// 글꼴이 주는 폭을 믿지 않고 우리가 정한 값으로 한 자씩 놓기 때문에, 글꼴이 조금 달라도 격자가 어긋나지 않는다.
+    /// </summary>
+    public const double CharAdvance = FontSize / 2 * Squeeze + Tracking;
+
+    /// <summary>1장: 내용 10자 + 부호 1자 + 좌우 공백 2자.</summary>
+    public const int CellChars = 13;
+    public const double CellWidth = CellChars * CharAdvance;
+    public const double CellPadding = CharAdvance;
+    public const double RowHeaderWidth = 3 * CharAdvance + 16;   // 행 번호 세 자리와 좌우 여백
 
     private static readonly Typeface CellFace =
         new(new FontFamily("Nanum Gothic Coding, D2Coding, Consolas, Global Monospace"),
@@ -146,14 +162,46 @@ public sealed class SheetGrid : FrameworkElement
         (string text, bool rightAligned) = Render(cell, v);
         if (text.Length == 0) return;
 
-        var ft = new FormattedText(text, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
-            CellFace, FontSize, PaletteBrushes.Ink(cell?.Ink, cell?.Shade), 96)
-        { MaxTextWidth = CellWidth - CellPadding * 2, MaxLineCount = 1, Trimming = TextTrimming.None };
+        Brush ink = PaletteBrushes.Ink(cell?.Ink, cell?.Shade);
+        double width = TextWidth.Of(text) * CharAdvance;
+        double x = rightAligned ? rect.Right - CellPadding - width : rect.Left + CellPadding;
+        DrawSlots(dc, text, x, rect.Top, ink);
+    }
 
-        double x = rightAligned
-            ? rect.Right - CellPadding - ft.WidthIncludingTrailingWhitespace
-            : rect.Left + CellPadding;
-        dc.DrawText(ft, new Point(x, rect.Top + (RowHeight - ft.Height) / 2));
+    /// <summary>
+    /// 글자를 한 자씩 제 자리에 놓는다. 고정폭 격자라 자리가 이미 정해져 있으므로 이렇게 놓는 편이 정확하다.
+    /// 자간은 자리 사이를 좁히는 것이고 장평은 글자를 누르는 것이라, 둘을 따로 조절할 수 있다.
+    /// </summary>
+    private void DrawSlots(DrawingContext dc, string text, double x, double top, Brush ink)
+    {
+        foreach (char ch in text)
+        {
+            FormattedText ft = Glyph(ch, ink);
+            double y = top + (RowHeight - ft.Height) / 2;
+
+            if (Squeeze != 1.0)
+            {
+                dc.PushTransform(new ScaleTransform(Squeeze, 1, x, 0));
+                dc.DrawText(ft, new Point(x, y));
+                dc.Pop();
+            }
+            else dc.DrawText(ft, new Point(x, y));
+
+            x += TextWidth.Of(ch) * CharAdvance;
+        }
+    }
+
+    // 글자 모양은 몇 가지 안 되니 만들어 두고 돌려쓴다. 칸마다 다시 만들면 그리는 값이 그만큼 붙는다.
+    private readonly Dictionary<(char, Brush), FormattedText> _glyphs = new();
+
+    private FormattedText Glyph(char ch, Brush ink)
+    {
+        if (_glyphs.TryGetValue((ch, ink), out FormattedText? ft)) return ft;
+        ft = new FormattedText(ch.ToString(), CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
+                               CellFace, FontSize, ink, 96);
+        if (_glyphs.Count > 4096) _glyphs.Clear();
+        _glyphs[(ch, ink)] = ft;
+        return ft;
     }
 
     /// <summary>사양서 2~6장의 표시 규칙. 숫자는 오른쪽, 텍스트는 왼쪽에 붙는다.</summary>
