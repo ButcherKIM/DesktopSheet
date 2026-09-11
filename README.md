@@ -33,6 +33,18 @@ dotnet publish src/DesktopSheet.App -c Release
 .NET 런타임을 따로 설치하지 않아도 되고, 서명하지 않았으므로 처음 실행할 때
 윈도우가 띄우는 창에서 **추가 정보 → 실행**을 골라야 합니다(17.3).
 
+크기는 69MB 입니다. 런타임을 품고 있어 그렇고, 단일 파일 압축을 켜서
+161MB 에서 여기까지 줄인 값입니다. 윈도우가 아닌 곳에서도 이 명령이
+그대로 돌아가 윈도우용 실행 파일이 나옵니다.
+
+고칠 때마다 주고받을 것이라면 런타임을 품지 않는 쪽이 훨씬 가볍습니다.
+받는 PC 에 [.NET 8 데스크톱 런타임](https://dotnet.microsoft.com/download/dotnet/8.0)
+을 한 번 설치해 두고 아래로 만들면 2MB 안팎이 됩니다.
+
+```
+dotnet publish src/DesktopSheet.App -c Release -p:SelfContained=false -p:PublishSingleFile=false
+```
+
 ## 확인
 
 ```
