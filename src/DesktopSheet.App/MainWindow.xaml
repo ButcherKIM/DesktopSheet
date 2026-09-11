@@ -15,6 +15,8 @@
                             GlassFrameThickness="0" CornerRadius="0" UseAeroCaptionButtons="False" />
     </shell:WindowChrome.WindowChrome>
 
+    <!-- 테두리가 없으면 창이 바탕과 붙어 보여 얇은 선을 하나 두른다 -->
+    <Border BorderBrush="#8D96A3" BorderThickness="1" Background="White">
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="24" />
@@ -36,4 +38,5 @@
                      VerticalContentAlignment="Center" />
         </Grid>
     </Grid>
+    </Border>
 </Window>

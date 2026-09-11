@@ -26,6 +26,7 @@ public partial class MainWindow : Window
     private CellAddress? _tipCell;
     private bool _exiting;
     private int? _renamingSheet;
+    private HelpWindow? _help;
 
     public MainWindow(BookStore store, LoadResult loaded)
     {
@@ -529,6 +530,11 @@ public partial class MainWindow : Window
         folder.Click += (_, _) => System.Diagnostics.Process.Start(
             new System.Diagnostics.ProcessStartInfo(_store.Directory) { UseShellExecute = true });
         menu.Items.Add(folder);
+        menu.Items.Add(new Separator());
+
+        var help = new MenuItem { Header = "단축키 도움말" };
+        help.Click += (_, _) => ShowHelp();
+        menu.Items.Add(help);
 
         menu.IsOpen = true;
     }
@@ -554,6 +560,14 @@ public partial class MainWindow : Window
             root.Items.Add(item);
         }
         return root;
+    }
+
+    private void ShowHelp()
+    {
+        if (_help is { IsLoaded: true }) { _help.Activate(); return; }
+        _help = new HelpWindow { Owner = this };
+        _help.Closed += (_, _) => _help = null;
+        _help.Show();
     }
 
     private void ExportCsv()

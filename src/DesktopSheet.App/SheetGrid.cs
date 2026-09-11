@@ -356,6 +356,22 @@ public sealed class SheetGrid : FrameworkElement
         ReleaseMouseCapture();
     }
 
+    /// <summary>
+    /// 우클릭한 칸으로 커서를 옮긴다. 그러지 않으면 메뉴가 아까 고른 칸에 걸린다.
+    /// 이미 고른 영역 안을 눌렀으면 영역을 그대로 둔다 - 여러 칸에 한꺼번에 색을 칠할 때 쓴다.
+    /// </summary>
+    protected override void OnMouseRightButtonDown(MouseButtonEventArgs e)
+    {
+        Focus();
+        Point p = e.GetPosition(this);
+        if (p.X < RowHeaderWidth || p.Y < ColHeaderHeight) return;
+
+        int row = RowAt(p.Y), col = ColAt(p.X);
+        var at = new CellAddress(Selection.Cursor.Sheet, row, col);
+        if (!Selection.Range.Contains(at)) Selection.MoveTo(row, col);
+        Raise();
+    }
+
     protected override void OnMouseWheel(MouseWheelEventArgs e)
     {
         int steps = e.Delta > 0 ? -3 : 3;
