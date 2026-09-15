@@ -20,10 +20,10 @@ public sealed class SheetGrid : FrameworkElement
     public const double RowHeight = 20;
 
     /// <summary>장평. 글자를 가로로 누르는 비율이다. 1 이면 누르지 않는다.</summary>
-    public const double Squeeze = 0.9375;
+    public const double Squeeze = 1.0;
 
     /// <summary>자간 보정(px). 음수면 글자 사이가 좁아진다. 글자 모양은 건드리지 않는다.</summary>
-    public const double Tracking = -0.5;
+    public const double Tracking = 0.0;
 
     /// <summary>
     /// 영문 한 자가 차지하는 가로 자리. 한글은 이것의 두 배다.
