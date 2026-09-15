@@ -68,6 +68,10 @@ public sealed class SheetGrid : FrameworkElement
 
     private bool _dragging;
 
+    /// <summary>화면 배율(14.5). 그릴 때마다 갱신해 글자와 선을 화면 픽셀에 붙이는 데 쓴다.</summary>
+    private double _dpi = 1.0;
+    private Pen _hairline = GridPen;
+
     public SheetGrid()
     {
         Focusable = true;
@@ -107,6 +111,14 @@ public sealed class SheetGrid : FrameworkElement
 
     protected override void OnRender(DrawingContext dc)
     {
+        double dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
+        if (dpi != _dpi)
+        {
+            _dpi = dpi <= 0 ? 1.0 : dpi;
+            // 선을 화면 픽셀 하나 굵기로 맞춘다. 배율이 150% 면 1 단위가 1.5픽셀이라 그냥 두면 흐려진다.
+            _hairline = Freeze(new Pen(GridLine, 1 / _dpi));
+        }
+
         dc.DrawRectangle(Brushes.White, null, new Rect(0, 0, ActualWidth, ActualHeight));
 
         int rows = Math.Min(VisibleRows + 1, Sheet.Rows - TopRow);
@@ -177,15 +189,17 @@ public sealed class SheetGrid : FrameworkElement
         foreach (char ch in text)
         {
             FormattedText ft = Glyph(ch, ink);
-            double y = top + (RowHeight - ft.Height) / 2;
+            // 한 자 폭이 7px 이면 배율 150% 에서 10.5픽셀이라 글자가 반 픽셀씩 밀린다. 화면 픽셀에 붙여 놓는다.
+            double px = SnapToPixel(x);
+            double y = SnapToPixel(top + (RowHeight - ft.Height) / 2);
 
             if (Squeeze != 1.0)
             {
-                dc.PushTransform(new ScaleTransform(Squeeze, 1, x, 0));
-                dc.DrawText(ft, new Point(x, y));
+                dc.PushTransform(new ScaleTransform(Squeeze, 1, px, 0));
+                dc.DrawText(ft, new Point(px, y));
                 dc.Pop();
             }
-            else dc.DrawText(ft, new Point(x, y));
+            else dc.DrawText(ft, new Point(px, y));
 
             x += TextWidth.Of(ch) * CharAdvance;
         }
@@ -223,13 +237,13 @@ public sealed class SheetGrid : FrameworkElement
 
         for (int c = 0; c <= cols; c++)
         {
-            double x = Snap(RowHeaderWidth + c * CellWidth);
-            dc.DrawLine(GridPen, new Point(x, 0), new Point(x, bottom));
+            double x = SnapToLine(RowHeaderWidth + c * CellWidth);
+            dc.DrawLine(_hairline, new Point(x, 0), new Point(x, bottom));
         }
         for (int r = 0; r <= rows; r++)
         {
-            double y = Snap(ColHeaderHeight + r * RowHeight);
-            dc.DrawLine(GridPen, new Point(0, y), new Point(right, y));
+            double y = SnapToLine(ColHeaderHeight + r * RowHeight);
+            dc.DrawLine(_hairline, new Point(0, y), new Point(right, y));
         }
     }
 
@@ -344,7 +358,11 @@ public sealed class SheetGrid : FrameworkElement
         dc.DrawText(ft, new Point(rect.Left + (rect.Width - ft.Width) / 2, rect.Top + (rect.Height - ft.Height) / 2));
     }
 
-    private static double Snap(double v) => Math.Round(v) + 0.5;
+    /// <summary>화면 픽셀 경계에 붙인다.</summary>
+    private double SnapToPixel(double v) => Math.Round(v * _dpi) / _dpi;
+
+    /// <summary>한 픽셀 굵기 선은 픽셀 한가운데에 놓아야 두 픽셀에 걸쳐 흐려지지 않는다.</summary>
+    private double SnapToLine(double v) => (Math.Round(v * _dpi) + 0.5) / _dpi;
 
     // --- 마우스 (10.1) ---
 
