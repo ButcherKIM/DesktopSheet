@@ -1,6 +1,9 @@
 # 저장소 안에서 그대로 실행한다: python3 tools/check_spec.py
 # SPEC.md 무결성 검사. 문서에 적힌 수치와 예시를 규칙대로 다시 계산해 맞는지 본다.
 import io, re, sys, unicodedata
+
+# 윈도우 콘솔은 기본 인코딩이 cp1252 라 한글을 찍다가 죽는다. 어디서나 돌게 UTF-8 로 못박는다.
+sys.stdout.reconfigure(encoding='utf-8')
 from decimal import Decimal, ROUND_HALF_UP, getcontext
 import os
 HERE = os.path.dirname(os.path.abspath(__file__))
