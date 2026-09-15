@@ -1,0 +1,71 @@
+# 푸시할 때마다 윈도우용 실행 파일을 만들어 릴리스에 올린다.
+# 사양서 17.2 와 17.3: 런타임을 품은 단일 파일과, .NET 이 깔린 PC 용 작은 파일 둘 다 낸다.
+name: 실행 파일
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - claude/amazing-lamport-yirb1l
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - '.github/workflows/build.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: 시험
+        run: dotnet test tests/DesktopSheet.Core.Tests/DesktopSheet.Core.Tests.csproj -c Release --nologo
+
+      - name: 사양서 무결성 검사
+        run: python3 tools/check_spec.py
+        shell: bash
+
+      - name: 런타임을 품은 단일 파일 (설치 필요 없음)
+        run: dotnet publish src/DesktopSheet.App -c Release -o out/bundled --nologo
+
+      - name: 런타임을 뺀 단일 파일 (.NET 8 이 깔린 PC 용)
+        run: dotnet publish src/DesktopSheet.App -c Release -o out/slim --nologo
+             -p:SelfContained=false -p:PublishSingleFile=true
+
+      - name: 이름 붙여 모으기
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp out/bundled/DesktopSheet.exe dist/DesktopSheet.exe
+          cp out/slim/DesktopSheet.exe    dist/DesktopSheet-needs-dotnet8.exe
+          ls -la dist
+
+      - name: 빌드 결과 보관
+        uses: actions/upload-artifact@v4
+        with:
+          name: DesktopSheet-${{ github.run_number }}
+          path: dist/*.exe
+
+      - name: 릴리스에 올리기
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "build-${{ github.run_number }}" dist/*.exe \
+            --title "빌드 ${{ github.run_number }}" \
+            --notes "커밋 ${{ github.sha }}
+
+          - \`DesktopSheet.exe\` — 런타임을 품은 판. 아무것도 깔지 않아도 돕니다(69MB).
+          - \`DesktopSheet-needs-dotnet8.exe\` — .NET 8 이 깔린 PC 용(300KB).
+
+          처음 실행하면 윈도우가 경고 창을 띄웁니다. **추가 정보 → 실행**을 고르십시오." \
+            --latest
