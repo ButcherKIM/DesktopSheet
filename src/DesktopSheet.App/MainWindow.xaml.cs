@@ -27,6 +27,8 @@ public partial class MainWindow : Window
     private bool _exiting;
     private int? _renamingSheet;
     private HelpWindow? _help;
+    private bool _editing;
+    private bool _suppressTextChanged;
 
     public MainWindow(BookStore store, LoadResult loaded)
     {
@@ -39,8 +41,12 @@ public partial class MainWindow : Window
         GridView.Book = _book;
         GridView.Selection = new Selection(Math.Clamp(_windowState.Sheet, 0, _book.Sheets.Count - 1));
         GridView.Selection.MoveTo(_windowState.Row, _windowState.Col);
-        GridView.SelectionChanged += (_, _) => { BuildTabs(); GridView.InvalidateVisual(); };
-        GridView.EditRequested += (_, _) => BeginEdit(null);
+        GridView.SelectionChanged += (_, _) => { BuildTabs(); GridView.InvalidateVisual(); FocusEditor(); };
+        GridView.Scrolled += (_, _) => PositionEditor();
+        GridView.EditRequested += (_, _) => BeginEdit();
+        // 칸을 클릭하면 치고 있던 값을 먼저 확정한다. 그 뒤에 그리드가 커서를 옮긴다.
+        GridView.PreviewMouseLeftButtonDown += (_, _) => CommitEdit(MoveDirection.Down, move: false);
+        GridView.PreviewMouseRightButtonDown += (_, _) => CommitEdit(MoveDirection.Down, move: false);
         GridView.MouseMove += GridView_MouseMove;
         GridView.MouseRightButtonUp += GridView_MouseRightButtonUp;
 
@@ -61,15 +67,16 @@ public partial class MainWindow : Window
         else WindowStartupLocation = WindowStartupLocation.CenterScreen;
 
         SourceInitialized += (_, _) => Win32.HideFromTaskbarAndAltTab(this);
-        Loaded += (_, _) => { BuildTabs(); GridView.Focus(); };
+        Loaded += (_, _) => { BuildTabs(); ShowIdle(); FocusEditor(); };
+        Activated += (_, _) => FocusEditor();
 
         _saveTimer.Tick += (_, _) => SaveIfDue();
         _saveTimer.Start();
 
         Editor.PreviewKeyDown += Editor_PreviewKeyDown;
+        Editor.TextChanged += Editor_TextChanged;
         Editor.LostKeyboardFocus += (_, _) => CommitEdit(MoveDirection.Down, move: false);
         PreviewKeyDown += Window_PreviewKeyDown;
-        PreviewTextInput += Window_PreviewTextInput;
         // 14.1: 창에는 닫기 단추가 없다. 밖에서 닫으라고 해도 숨기기만 하되, 종료할 때는 막지 않는다.
         Closing += (_, e) => { if (!_exiting) { e.Cancel = true; Hide(); } };
     }
@@ -205,11 +212,14 @@ public partial class MainWindow : Window
     }
 
     // --- 편집 (10.1, 10.2) ---
+    //
+    // 편집기는 늘 커서 칸 위에 있고 포커스를 놓지 않는다. 글자를 칠 때 만들어 포커스를 넘기면,
+    // 입력기는 이미 그리드에 조합을 걸어 둔 뒤라 첫 글자가 한 박자씩 밀린다.
+    // 값을 치기 전에는 테두리도 글자색도 없어 안 보이고, 첫 글자가 들어오면 그때 모양을 갖춘다.
 
-    private void BeginEdit(string? seed)
+    private void PositionEditor()
     {
-        CellAddress at = Sel.Cursor;
-        Rect r = GridView.CellRect(at.Row, at.Col);
+        Rect r = GridView.CellRect(Sel.Cursor.Row, Sel.Cursor.Col);
         Editor.Margin = new Thickness(r.Left, r.Top, 0, 0);
         // 장평을 걸었으면 편집기에도 같은 배율을 걸어야 편집으로 들어갈 때 글자가 튀지 않는다.
         Editor.RenderTransform = SheetGrid.Squeeze == 1.0
@@ -218,18 +228,69 @@ public partial class MainWindow : Window
         Editor.Width = r.Width / SheetGrid.Squeeze;
         Editor.Height = r.Height;
         Editor.FontSize = SheetGrid.FontSize;
-        Editor.Text = seed ?? _book.FindCell(at)?.Raw ?? "";
-        Editor.Visibility = Visibility.Visible;
-        Editor.Focus();
-        Editor.CaretIndex = Editor.Text.Length;
     }
 
-    private bool IsEditing => Editor.Visibility == Visibility.Visible;
+    private void FocusEditor()
+    {
+        PositionEditor();
+        if (!Editor.IsKeyboardFocused) Editor.Focus();
+    }
+
+    private void SetEditorText(string text)
+    {
+        _suppressTextChanged = true;
+        Editor.Text = text;
+        Editor.CaretIndex = text.Length;
+        _suppressTextChanged = false;
+    }
+
+    /// <summary>값을 치기 전. 칸 위에 있지만 보이지 않고 마우스도 지나쳐 간다.</summary>
+    private void ShowIdle()
+    {
+        _editing = false;
+        Editor.BorderThickness = new Thickness(0);
+        Editor.Padding = new Thickness(SheetGrid.CellPadding, 0, SheetGrid.CellPadding, 0);
+        Editor.Background = Brushes.Transparent;
+        Editor.Foreground = Brushes.Transparent;
+        Editor.CaretBrush = Brushes.Transparent;
+        Editor.IsHitTestVisible = false;
+        SetEditorText("");
+    }
+
+    /// <summary>글자가 들어온 뒤. 테두리와 글자색을 갖춘다.</summary>
+    private void ShowEditing()
+    {
+        _editing = true;
+        Editor.BorderThickness = new Thickness(2);
+        // 테두리가 생긴 만큼 안쪽 여백을 줄인다. 그러지 않으면 편집으로 들어갈 때 글자가 2px 밀린다.
+        Editor.Padding = new Thickness(SheetGrid.CellPadding - 2, 0, SheetGrid.CellPadding - 2, 0);
+        Editor.Background = Brushes.White;
+        Editor.Foreground = PaletteBrushes.Of(Palette.DefaultInk);
+        Editor.CaretBrush = PaletteBrushes.Of(Palette.DefaultInk);
+        Editor.IsHitTestVisible = true;
+    }
+
+    /// <summary>F2 와 더블클릭. 칸에 있던 글자를 불러 놓고 편집으로 들어간다.</summary>
+    private void BeginEdit()
+    {
+        PositionEditor();
+        ShowEditing();
+        SetEditorText(_book.FindCell(Sel.Cursor)?.Raw ?? "");
+        Editor.Focus();
+    }
+
+    /// <summary>입력기가 편집기에 첫 글자를 넣은 순간이다. 글자는 이미 들어와 있으므로 모양만 갖춘다.</summary>
+    private void Editor_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_suppressTextChanged || _editing || Editor.Text.Length == 0) return;
+        ShowEditing();
+    }
 
     private void Editor_PreviewKeyDown(object sender, KeyEventArgs e)
     {
         // 10.2: 한글을 조합하는 중에는 입력기가 키를 가져간다. Enter 는 조합만 끝내고 커서는 그 칸에 남는다.
         if (e.Key == Key.ImeProcessed) return;
+        if (!_editing) return;
 
         switch (e.Key)
         {
@@ -242,8 +303,7 @@ public partial class MainWindow : Window
                 e.Handled = true;
                 break;
             case Key.Escape:
-                Editor.Visibility = Visibility.Collapsed;
-                GridView.Focus();
+                CancelEdit();
                 e.Handled = true;
                 break;
         }
@@ -251,26 +311,34 @@ public partial class MainWindow : Window
 
     private void CommitEdit(MoveDirection dir, bool move = true)
     {
-        if (!IsEditing) return;
+        if (!_editing) return;
         string text = Editor.Text;
-        Editor.Visibility = Visibility.Collapsed;
-
         CellAddress at = Sel.Cursor;
+        ShowIdle();
+
         UndoStep step = UndoStep.Begin(_book, new[] { at });
         _book.SetInput(at, text);
         _undo.Push(step.Commit(_book));
-
         Touch();
+
         if (move) Sel.Advance(dir);
         GridView.Raise();
-        GridView.Focus();
+        FocusEditor();
+    }
+
+    private void CancelEdit()
+    {
+        if (!_editing) return;
+        ShowIdle();
+        GridView.InvalidateVisual();
+        FocusEditor();
     }
 
     // --- 키 (10.1, 10.3, 10.5, 15.1, 15.5) ---
 
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (IsEditing) return;
+        if (_editing) return;
 
         Key key = e.Key == Key.System ? e.SystemKey : e.Key;
         bool ctrl = (Keyboard.Modifiers & ModifierKeys.Control) != 0;
@@ -318,23 +386,16 @@ public partial class MainWindow : Window
             case Key.Right: Sel.Move(MoveDirection.Right, shift); break;
             case Key.Enter: Sel.Advance(shift ? MoveDirection.Up : MoveDirection.Down); break;
             case Key.Tab:   Sel.Advance(shift ? MoveDirection.Left : MoveDirection.Right); break;
-            case Key.F2:    BeginEdit(null); e.Handled = true; return;
+            case Key.F2:    BeginEdit(); e.Handled = true; return;
             case Key.Delete: ClearValues(); e.Handled = true; return;
             case Key.Escape: GridView.CopyMarquee = null; _copySource = null; GridView.InvalidateVisual(); e.Handled = true; return;
+            case Key.Back:  BeginEdit(); SetEditorText(""); e.Handled = true; return;
             case Key.PageDown: GridView.ScrollBy(GridView.VisibleRows, 0); e.Handled = true; return;
             case Key.PageUp:   GridView.ScrollBy(-GridView.VisibleRows, 0); e.Handled = true; return;
             default: return;
         }
 
         GridView.Raise();
-        e.Handled = true;
-    }
-
-    /// <summary>글자를 치면 바로 편집으로 들어간다(10.2).</summary>
-    private void Window_PreviewTextInput(object sender, TextCompositionEventArgs e)
-    {
-        if (IsEditing || e.Text.Length == 0 || char.IsControl(e.Text[0])) return;
-        BeginEdit(e.Text);
         e.Handled = true;
     }
 
@@ -546,6 +607,7 @@ public partial class MainWindow : Window
         help.Click += (_, _) => ShowHelp();
         menu.Items.Add(help);
 
+        menu.Closed += (_, _) => FocusEditor();   // 메뉴가 가져간 포커스를 돌려준다
         menu.IsOpen = true;
     }
 

@@ -31,9 +31,12 @@
 
         <Grid Grid.Row="1">
             <local:SheetGrid x:Name="GridView" />
-            <TextBox x:Name="Editor" Visibility="Collapsed"
+            <!-- 10.2: 늘 커서 칸 위에 있고 포커스를 쥔다. 값을 치기 전에는 보이지 않는다. -->
+            <TextBox x:Name="Editor"
                      HorizontalAlignment="Left" VerticalAlignment="Top"
-                     BorderBrush="#0B48C8" BorderThickness="2" Padding="6,0,6,0"
+                     BorderBrush="#0B48C8" BorderThickness="0" Padding="6,0,6,0"
+                     Background="Transparent" Foreground="Transparent" CaretBrush="Transparent"
+                     IsHitTestVisible="False"
                      FontFamily="Nanum Gothic Coding, D2Coding, Consolas" FontSize="16"
                      VerticalContentAlignment="Center" />
         </Grid>

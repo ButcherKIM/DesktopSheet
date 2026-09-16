@@ -65,6 +65,7 @@ public sealed class SheetGrid : FrameworkElement
 
     public event EventHandler? SelectionChanged;
     public event EventHandler? EditRequested;
+    public event EventHandler? Scrolled;
 
     private bool _dragging;
 
@@ -74,7 +75,9 @@ public sealed class SheetGrid : FrameworkElement
 
     public SheetGrid()
     {
-        Focusable = true;
+        // 10.2: 포커스는 편집기가 늘 쥔다. 그리드가 포커스를 가져가면 입력기가 그리드에 조합을 걸어
+        // 첫 글자가 한 박자씩 밀린다.
+        Focusable = false;
         FocusVisualStyle = null;
         ClipToBounds = true;
     }
@@ -101,6 +104,7 @@ public sealed class SheetGrid : FrameworkElement
         TopRow = Math.Clamp(TopRow + rows, 0, Math.Max(0, Sheet.Rows - VisibleRows));
         LeftCol = Math.Clamp(LeftCol + cols, 0, Math.Max(0, Sheet.Cols - VisibleCols));
         InvalidateVisual();
+        Scrolled?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>칸 하나가 차지하는 자리. 편집기를 얹을 때도 쓴다.</summary>
@@ -349,6 +353,7 @@ public sealed class SheetGrid : FrameworkElement
             LeftCol = (int)Math.Round(Math.Clamp(at / span, 0, 1) * MaxLeftCol);
         }
         InvalidateVisual();
+        Scrolled?.Invoke(this, EventArgs.Empty);
     }
 
     private static void DrawCentered(DrawingContext dc, string text, Rect rect, Brush brush)
@@ -368,7 +373,6 @@ public sealed class SheetGrid : FrameworkElement
 
     protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e)
     {
-        Focus();
         if (e.ClickCount == 2)                       // 더블클릭은 편집으로 들어간다(8.6)
         {
             EditRequested?.Invoke(this, EventArgs.Empty);
@@ -428,7 +432,6 @@ public sealed class SheetGrid : FrameworkElement
     /// </summary>
     protected override void OnMouseRightButtonDown(MouseButtonEventArgs e)
     {
-        Focus();
         Point p = e.GetPosition(this);
         if (p.X < RowHeaderWidth || p.Y < ColHeaderHeight) return;
 
