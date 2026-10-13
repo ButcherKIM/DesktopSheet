@@ -52,12 +52,19 @@ public sealed class SheetGrid : FrameworkElement
     private static readonly Pen SelectionPen = Freeze(new Pen(SelectionEdge, 2));
     private static readonly Pen CursorPen = Freeze(new Pen(SelectionEdge, 1));
     private static readonly Pen CopyPen = Freeze(new Pen(SelectionEdge, 1) { DashStyle = new DashStyle(new double[] { 3, 2 }, 0) });
+    // 10.6: 식에 찍어 넣은 칸. 선택은 파란 실선이고 복사 표시는 파란 점선이므로 빨간 점선으로 그려 셋을 구분한다.
+    private static readonly Pen PointPen = Freeze(new Pen(
+        Freeze(new SolidColorBrush(Color.FromRgb(0xAE, 0x00, 0x00))), 2)
+        { DashStyle = new DashStyle(new double[] { 3, 2 }, 0) });
 
     private static T Freeze<T>(T f) where T : Freezable { f.Freeze(); return f; }
 
     public Workbook Book { get; set; } = new();
     public Selection Selection { get; set; } = new();
     public CellRange? CopyMarquee { get; set; }
+
+    /// <summary>10.6. 식을 치는 중에 찍어 둔 칸. 선택과 달리 커서를 옮기지 않는다.</summary>
+    public CellRange? PointRange { get; set; }
 
     public int TopRow { get; private set; }
     public int LeftCol { get; private set; }
@@ -271,6 +278,12 @@ public sealed class SheetGrid : FrameworkElement
             Rect a = CellRect(m.Top, m.Left), b = CellRect(m.Bottom, m.Right);
             dc.DrawRectangle(null, CopyPen, new Rect(a.Left, a.Top, b.Right - a.Left, b.Bottom - a.Top));
         }
+
+        if (PointRange is { } q && q.Sheet == Selection.Cursor.Sheet)
+        {
+            Rect a = CellRect(q.Top, q.Left), b = CellRect(q.Bottom, q.Right);
+            dc.DrawRectangle(null, PointPen, new Rect(a.Left, a.Top, b.Right - a.Left, b.Bottom - a.Top));
+        }
     }
 
     /// <summary>12.3. 스크롤바는 그리드 위에 겹쳐 그려 창 크기를 먹지 않는다.</summary>
@@ -447,6 +460,14 @@ public sealed class SheetGrid : FrameworkElement
         if ((Keyboard.Modifiers & ModifierKeys.Shift) != 0) ScrollBy(0, steps);
         else ScrollBy(steps, 0);
         e.Handled = true;
+    }
+
+    /// <summary>그 자리에 있는 칸. 머리글이나 스크롤바 위면 빈 값이다. 10.6 이 찍을 칸을 찾는 데 쓴다.</summary>
+    public CellAddress? CellAt(Point p)
+    {
+        if (p.X < RowHeaderWidth || p.Y < ColHeaderHeight) return null;
+        if (p.X >= ActualWidth - ScrollBarWidth || p.Y >= ActualHeight - ScrollBarWidth) return null;
+        return new CellAddress(Selection.Cursor.Sheet, RowAt(p.Y), ColAt(p.X));
     }
 
     private int RowAt(double y) => Math.Clamp(TopRow + (int)((y - ColHeaderHeight) / RowHeight), 0, Sheet.Rows - 1);

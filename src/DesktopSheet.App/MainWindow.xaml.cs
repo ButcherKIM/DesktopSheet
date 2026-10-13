@@ -29,6 +29,10 @@ public partial class MainWindow : Window
     private HelpWindow? _help;
     private bool _editing;
     private bool _suppressTextChanged;
+    private int _pointStart = -1;          // 10.6: 찍어 넣은 참조가 식 안에서 시작하는 자리. -1 이면 아직 없다
+    private int _pointLength;
+    private bool _pointDragging;
+    private CellAddress _pointAnchor;
 
     public MainWindow(BookStore store, LoadResult loaded)
     {
@@ -44,8 +48,8 @@ public partial class MainWindow : Window
         GridView.SelectionChanged += (_, _) => { BuildTabs(); GridView.InvalidateVisual(); FocusEditor(); };
         GridView.Scrolled += (_, _) => PositionEditor();
         GridView.EditRequested += (_, _) => BeginEdit();
-        // 칸을 클릭하면 치고 있던 값을 먼저 확정한다. 그 뒤에 그리드가 커서를 옮긴다.
-        GridView.PreviewMouseLeftButtonDown += (_, _) => CommitEdit(MoveDirection.Down, move: false);
+        GridView.PreviewMouseLeftButtonDown += GridView_PreviewMouseLeftButtonDown;
+        GridView.PreviewMouseLeftButtonUp += GridView_PreviewMouseLeftButtonUp;
         GridView.PreviewMouseRightButtonDown += (_, _) => CommitEdit(MoveDirection.Down, move: false);
         GridView.MouseMove += GridView_MouseMove;
         GridView.MouseRightButtonUp += GridView_MouseRightButtonUp;
@@ -107,7 +111,8 @@ public partial class MainWindow : Window
                 Focusable = false,
                 ContextMenu = SheetMenu(index),
             };
-            tab.Click += (_, _) => { Sel.SetSheet(index); GridView.Raise(); GridView.Focus(); };
+            // 치고 있던 값을 이 시트에 확정한 뒤에 넘어간다. 그러지 않으면 값이 넘어간 시트에 적힌다.
+            tab.Click += (_, _) => { CommitEdit(MoveDirection.Down, move: false); Sel.SetSheet(index); GridView.Raise(); };
             TabPanel.Children.Add(tab);
         }
 
@@ -236,11 +241,11 @@ public partial class MainWindow : Window
         if (!Editor.IsKeyboardFocused) Editor.Focus();
     }
 
-    private void SetEditorText(string text)
+    private void SetEditorText(string text, int caret = -1)
     {
         _suppressTextChanged = true;
         Editor.Text = text;
-        Editor.CaretIndex = text.Length;
+        Editor.CaretIndex = caret < 0 ? text.Length : Math.Clamp(caret, 0, text.Length);
         _suppressTextChanged = false;
     }
 
@@ -255,6 +260,7 @@ public partial class MainWindow : Window
         Editor.CaretBrush = Brushes.Transparent;
         Editor.IsHitTestVisible = false;
         SetEditorText("");
+        ClearPoint();
     }
 
     /// <summary>글자가 들어온 뒤. 테두리와 글자색을 갖춘다.</summary>
@@ -282,8 +288,83 @@ public partial class MainWindow : Window
     /// <summary>입력기가 편집기에 첫 글자를 넣은 순간이다. 글자는 이미 들어와 있으므로 모양만 갖춘다.</summary>
     private void Editor_TextChanged(object sender, TextChangedEventArgs e)
     {
-        if (_suppressTextChanged || _editing || Editor.Text.Length == 0) return;
+        if (_suppressTextChanged) return;
+        ClearPoint();                                   // 10.6: 글자를 치면 찍어 둔 참조는 갈아치울 대상이 아니다
+        if (_editing || Editor.Text.Length == 0) return;
         ShowEditing();
+    }
+
+    // --- 등호를 치고 칸을 클릭해 참조를 넣기 (10.6) ---
+
+    /// <summary>
+    /// 식을 치는 중에 칸을 클릭하면 커서를 옮기는 대신 참조를 식에 넣는다.
+    /// 그 밖에는 치고 있던 값을 먼저 확정한다. 그 뒤에 그리드가 커서를 옮긴다.
+    /// </summary>
+    private void GridView_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ClickCount == 1 && _editing && FormulaPoint.Accepts(Editor.Text, Editor.CaretIndex)
+            && GridView.CellAt(e.GetPosition(GridView)) is { } at)
+        {
+            _pointAnchor = at;
+            _pointDragging = true;
+            GridView.CaptureMouse();
+            PointAt(CellRange.One(at));
+            e.Handled = true;
+            return;
+        }
+
+        CommitEdit(MoveDirection.Down, move: false);
+    }
+
+    private void GridView_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!_pointDragging) return;
+        _pointDragging = false;
+        GridView.ReleaseMouseCapture();
+        e.Handled = true;
+    }
+
+    /// <summary>찍은 칸의 참조를 식에 넣고 그 칸에 표시를 둔다.</summary>
+    private void PointAt(CellRange range)
+    {
+        // 찍어 둔 참조는 커서가 아직 그 뒤에 붙어 있을 때만 갈아치운다.
+        // 커서를 식 가운데로 옮겨 두었다면 그 자리에 새로 끼우는 것이 맞다.
+        bool replace = _pointStart >= 0 && Editor.CaretIndex == _pointStart + _pointLength;
+
+        (string text, int start, int length) = FormulaPoint.Put(
+            Editor.Text, Editor.CaretIndex,
+            replace ? _pointStart : -1, replace ? _pointLength : 0,
+            FormulaPoint.Reference(range));
+
+        _pointStart = start;
+        _pointLength = length;
+        SetEditorText(text, start + length);
+        GridView.PointRange = range;
+        GridView.InvalidateVisual();
+    }
+
+    /// <summary>끌면 찍은 자리가 범위로 넓어진다. 처음 누른 칸이 한쪽 모서리다.</summary>
+    private void DragPoint(Point p)
+    {
+        if (GridView.CellAt(p) is not { } at) return;
+        CellRange grown = CellRange.Of(at.Sheet, _pointAnchor.Row, _pointAnchor.Col, at.Row, at.Col);
+        if (GridView.PointRange is { } now && now == grown) return;
+        PointAt(grown);
+    }
+
+    /// <summary>찍어 둔 참조를 잊는다. 다음 클릭은 갈아치우지 않고 새로 끼운다.</summary>
+    private void ClearPoint()
+    {
+        _pointStart = -1;
+        _pointLength = 0;
+        if (_pointDragging)
+        {
+            _pointDragging = false;
+            if (GridView.IsMouseCaptured) GridView.ReleaseMouseCapture();
+        }
+        if (GridView.PointRange is null) return;
+        GridView.PointRange = null;
+        GridView.InvalidateVisual();
     }
 
     private void Editor_PreviewKeyDown(object sender, KeyEventArgs e)
@@ -433,7 +514,13 @@ public partial class MainWindow : Window
     {
         _copySource = Sel.Range;
         _copyClipboardText = DelimitedText.Write(_book, Sel.Range, DelimitedText.Tab);
-        try { Clipboard.SetText(_copyClipboardText); } catch (System.Runtime.InteropServices.COMException) { }
+
+        // 10.4: 탭 구분 텍스트와 HTML 표를 함께 싣는다. 받는 쪽이 둘 중 아는 것을 골라 쓴다.
+        var data = new DataObject();
+        data.SetText(_copyClipboardText, TextDataFormat.UnicodeText);
+        data.SetText(HtmlTable.Write(_book, Sel.Range), TextDataFormat.Html);
+        try { Clipboard.SetDataObject(data, copy: true); }
+        catch (System.Runtime.InteropServices.COMException) { }
 
         GridView.CopyMarquee = Sel.Range;
         if (cut) { ClearValues(); _copySource = null; GridView.CopyMarquee = null; }
@@ -442,22 +529,42 @@ public partial class MainWindow : Window
 
     private void Paste(bool valuesOnly)
     {
-        string clipboard = "";
-        try { clipboard = Clipboard.GetText(); } catch (System.Runtime.InteropServices.COMException) { }
+        (string text, string html) = ReadClipboard();
 
-        // 밖에서 온 것이면 탭 구분 텍스트로 읽는다(10.4). 우리가 복사한 것이면 수식을 옮긴다(10.3).
-        bool fromOutside = _copySource is null || clipboard != _copyClipboardText;
-        if (fromOutside) PasteText(clipboard);
+        // 밖에서 온 것이면 표나 탭 구분 텍스트로 읽는다(10.4). 우리가 복사한 것이면 수식을 옮긴다(10.3).
+        bool fromOutside = _copySource is null || text != _copyClipboardText;
+        if (fromOutside)
+        {
+            // HTML 표를 먼저 읽는다. 파워포인트와 워드의 표는 텍스트에 행과 열의 경계가 남지 않는다.
+            List<List<string>> rows = HtmlTable.Read(html);
+            if (rows.Count == 0) rows = DelimitedText.Read(text, DelimitedText.Tab);
+            PasteRows(rows);
+        }
         else PasteCells(_copySource!.Value, valuesOnly);
 
         Touch();
         GridView.Raise();
     }
 
-    private void PasteText(string text)
+    private static (string Text, string Html) ReadClipboard()
     {
-        if (text.Length == 0) return;
-        List<List<string>> rows = DelimitedText.Read(text, DelimitedText.Tab);
+        try
+        {
+            IDataObject? data = Clipboard.GetDataObject();
+            if (data is null) return ("", "");
+            string text = data.GetDataPresent(DataFormats.UnicodeText)
+                ? data.GetData(DataFormats.UnicodeText) as string ?? "" : "";
+            string html = data.GetDataPresent(DataFormats.Html)
+                ? data.GetData(DataFormats.Html) as string ?? "" : "";
+            return (text, html);
+        }
+        catch (System.Runtime.InteropServices.COMException) { return ("", ""); }
+        catch (OutOfMemoryException) { return ("", ""); }
+    }
+
+    private void PasteRows(List<List<string>> rows)
+    {
+        if (rows.Count == 0) return;
         CellAddress anchor = Sel.Cursor;
 
         var cells = new List<CellAddress>();
@@ -527,6 +634,7 @@ public partial class MainWindow : Window
     private void GridView_MouseMove(object sender, MouseEventArgs e)
     {
         Point p = e.GetPosition(GridView);
+        if (_pointDragging) { HideTip(); DragPoint(p); return; }   // 10.6: 끌어서 범위를 찍는 중이다
         if (p.X < SheetGrid.RowHeaderWidth || p.Y < SheetGrid.ColHeaderHeight) { HideTip(); return; }
 
         int row = GridView.TopRow + (int)((p.Y - SheetGrid.ColHeaderHeight) / SheetGrid.RowHeight);
