@@ -74,6 +74,48 @@ public class FormulaPointTests
     }
 
     [Fact]
+    public void 방향키는_한_칸씩_옮기고_시트_밖으로는_나가지_않는다()
+    {
+        var at = new CellAddress(0, 5, 5);
+        Assert.Equal(new CellAddress(0, 4, 5), FormulaPoint.Step(at, MoveDirection.Up));
+        Assert.Equal(new CellAddress(0, 6, 5), FormulaPoint.Step(at, MoveDirection.Down));
+        Assert.Equal(new CellAddress(0, 5, 4), FormulaPoint.Step(at, MoveDirection.Left));
+        Assert.Equal(new CellAddress(0, 5, 6), FormulaPoint.Step(at, MoveDirection.Right));
+
+        var corner = new CellAddress(0, 0, 0);
+        Assert.Equal(corner, FormulaPoint.Step(corner, MoveDirection.Up));
+        Assert.Equal(corner, FormulaPoint.Step(corner, MoveDirection.Left));
+
+        var far = new CellAddress(0, Sheet.Rows - 1, Sheet.Cols - 1);
+        Assert.Equal(far, FormulaPoint.Step(far, MoveDirection.Down));
+        Assert.Equal(far, FormulaPoint.Step(far, MoveDirection.Right));
+    }
+
+    [Fact]
+    public void 방향키를_눌러_가면_참조_한_개가_옮겨_다닌다()
+    {
+        // B2 에서 =SUM( 까지 치고 아래쪽을 두 번 찍은 뒤 Shift 로 한 칸 넓힌 꼴이다.
+        var formulaCell = new CellAddress(0, 1, 1);
+        string text = "=SUM(";
+        int start = -1, length = 0;
+
+        CellAddress cursor = FormulaPoint.Step(formulaCell, MoveDirection.Down);
+        CellAddress anchor = cursor;
+        (text, start, length) = FormulaPoint.Put(text, text.Length, start, length, FormulaPoint.Reference(CellRange.One(cursor)));
+        Assert.Equal("=SUM(B3", text);
+
+        cursor = FormulaPoint.Step(cursor, MoveDirection.Down);
+        anchor = cursor;
+        (text, start, length) = FormulaPoint.Put(text, start + length, start, length, FormulaPoint.Reference(CellRange.One(cursor)));
+        Assert.Equal("=SUM(B4", text);                 // 참조가 늘지 않고 옮겨 다닌다
+
+        cursor = FormulaPoint.Step(cursor, MoveDirection.Down);
+        CellRange range = CellRange.Of(0, anchor.Row, anchor.Col, cursor.Row, cursor.Col);
+        (text, start, length) = FormulaPoint.Put(text, start + length, start, length, FormulaPoint.Reference(range));
+        Assert.Equal("=SUM(B4:B5", text);              // Shift 를 쥐면 앵커에서 범위가 넓어진다
+    }
+
+    [Fact]
     public void 찍은_참조는_상대_참조라_붙여넣을_때_밀린다()
     {
         string reference = FormulaPoint.Reference(CellRange.One(new CellAddress(0, 0, 0)));

@@ -40,6 +40,25 @@ public static class FormulaPoint
         return (text[..at] + reference + text[at..], at, reference.Length);
     }
 
+    /// <summary>
+    /// 방향키로 찍을 칸. 처음 누르면 식을 치는 칸에서 한 칸 떼고, 그다음부터는 찍어 둔 칸에서 한 칸씩 옮긴다.
+    /// 시트 밖으로는 나가지 않는다(10.1).
+    /// </summary>
+    public static CellAddress Step(CellAddress at, MoveDirection dir)
+    {
+        int row = at.Row;
+        int col = at.Col;
+        switch (dir)
+        {
+            case MoveDirection.Up:    row--; break;
+            case MoveDirection.Down:  row++; break;
+            case MoveDirection.Left:  col--; break;
+            default:                  col++; break;
+        }
+        // 이름이 from 이면 안 된다 - 뒤에 with 를 쓰면 컴파일러가 LINQ 질의로 읽는다.
+        return at with { Row = Math.Clamp(row, 0, Sheet.Rows - 1), Col = Math.Clamp(col, 0, Sheet.Cols - 1) };
+    }
+
     /// <summary>한 칸은 `A1`, 여러 칸은 `A1:B3` 으로 적는다(8.3).</summary>
     public static string Reference(CellRange range) =>
         range.IsSingle

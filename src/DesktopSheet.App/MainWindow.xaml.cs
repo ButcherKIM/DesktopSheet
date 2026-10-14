@@ -32,7 +32,9 @@ public partial class MainWindow : Window
     private int _pointStart = -1;          // 10.6: 찍어 넣은 참조가 식 안에서 시작하는 자리. -1 이면 아직 없다
     private int _pointLength;
     private bool _pointDragging;
-    private CellAddress _pointAnchor;
+    private CellAddress _pointAnchor;      // 찍은 범위의 고정된 모서리
+    private CellAddress _pointCursor;      // 방향키와 끌기가 옮기는 모서리
+    private bool _inputMode;               // 10.6: 입력 모드면 방향키로 참조를 찍고, 편집 모드면 글자 사이를 오간다
 
     public MainWindow(BookStore store, LoadResult loaded)
     {
@@ -69,6 +71,9 @@ public partial class MainWindow : Window
             Top = cy;
         }
         else WindowStartupLocation = WindowStartupLocation.CenterScreen;
+
+        // 편집기를 가두는 칸은 머리글 안쪽이다. 머리글 크기는 코드에 있으므로 여기서 넣는다.
+        EditorHost.Margin = new Thickness(SheetGrid.RowHeaderWidth, SheetGrid.ColHeaderHeight, 0, 0);
 
         SourceInitialized += (_, _) => Win32.HideFromTaskbarAndAltTab(this);
         Loaded += (_, _) => { BuildTabs(); ShowIdle(); FocusEditor(); };
@@ -225,7 +230,7 @@ public partial class MainWindow : Window
     private void PositionEditor()
     {
         Rect r = GridView.CellRect(Sel.Cursor.Row, Sel.Cursor.Col);
-        Editor.Margin = new Thickness(r.Left, r.Top, 0, 0);
+        Editor.Margin = new Thickness(r.Left - SheetGrid.RowHeaderWidth, r.Top - SheetGrid.ColHeaderHeight, 0, 0);
         // 장평을 걸었으면 편집기에도 같은 배율을 걸어야 편집으로 들어갈 때 글자가 튀지 않는다.
         Editor.RenderTransform = SheetGrid.Squeeze == 1.0
             ? Transform.Identity
@@ -276,9 +281,13 @@ public partial class MainWindow : Window
         Editor.IsHitTestVisible = true;
     }
 
-    /// <summary>F2 와 더블클릭. 칸에 있던 글자를 불러 놓고 편집으로 들어간다.</summary>
-    private void BeginEdit()
+    /// <summary>
+    /// F2 와 더블클릭. 칸에 있던 글자를 불러 놓고 편집으로 들어간다.
+    /// 이렇게 들어오면 편집 모드라서 방향키가 글자 사이를 오간다(10.6). 치던 글자를 고치러 들어온 것이기 때문이다.
+    /// </summary>
+    private void BeginEdit(bool inputMode = false)
     {
+        _inputMode = inputMode;
         PositionEditor();
         ShowEditing();
         SetEditorText(_book.FindCell(Sel.Cursor)?.Raw ?? "");
@@ -291,10 +300,11 @@ public partial class MainWindow : Window
         if (_suppressTextChanged) return;
         ClearPoint();                                   // 10.6: 글자를 치면 찍어 둔 참조는 갈아치울 대상이 아니다
         if (_editing || Editor.Text.Length == 0) return;
+        _inputMode = true;                              // 글자를 쳐서 들어온 편집이다. 방향키로 참조를 찍는다(10.6)
         ShowEditing();
     }
 
-    // --- 등호를 치고 칸을 클릭해 참조를 넣기 (10.6) ---
+    // --- 등호를 치고 칸을 클릭하거나 방향키를 눌러 참조를 넣기 (10.6) ---
 
     /// <summary>
     /// 식을 치는 중에 칸을 클릭하면 커서를 옮기는 대신 참조를 식에 넣는다.
@@ -306,6 +316,7 @@ public partial class MainWindow : Window
             && GridView.CellAt(e.GetPosition(GridView)) is { } at)
         {
             _pointAnchor = at;
+            _pointCursor = at;
             _pointDragging = true;
             GridView.CaptureMouse();
             PointAt(CellRange.One(at));
@@ -324,12 +335,48 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
+    /// <summary>
+    /// 10.6. 입력 모드에서 식의 참조 자리에 커서가 있으면 방향키가 참조를 찍는다.
+    /// 이미 찍어 둔 참조가 살아 있으면 그 참조를 옮기는 것이므로 자리를 다시 따지지 않는다.
+    /// </summary>
+    private bool CanPoint() =>
+        _editing && _inputMode
+        && (Keyboard.Modifiers & ModifierKeys.Control) == 0   // Ctrl+방향키는 글자를 단어 단위로 건너뛰는 데 둔다
+        && (PointLive || FormulaPoint.Accepts(Editor.Text, Editor.CaretIndex));
+
+    /// <summary>찍어 둔 참조가 아직 커서 바로 앞에 붙어 있는가. 그래야 다음에 찍는 것이 그것을 갈아치운다.</summary>
+    private bool PointLive => _pointStart >= 0 && Editor.CaretIndex == _pointStart + _pointLength;
+
+    private static MoveDirection Arrow(Key key) => key switch
+    {
+        Key.Up => MoveDirection.Up,
+        Key.Down => MoveDirection.Down,
+        Key.Left => MoveDirection.Left,
+        _ => MoveDirection.Right,
+    };
+
+    /// <summary>
+    /// 방향키로 찍는다. 처음 누르면 식을 치는 칸에서 한 칸 떼고, 그다음부터는 찍은 칸에서 한 칸씩 옮긴다.
+    /// Shift 를 쥐고 누르면 처음 찍은 칸을 모서리로 삼아 범위가 넓어진다.
+    /// </summary>
+    private void PointByArrow(MoveDirection dir, bool extend)
+    {
+        bool live = PointLive && GridView.PointRange is not null;
+        CellAddress moved = FormulaPoint.Step(live ? _pointCursor : Sel.Cursor, dir);
+
+        _pointCursor = moved;
+        if (!live || !extend) _pointAnchor = moved;
+
+        PointAt(CellRange.Of(moved.Sheet, _pointAnchor.Row, _pointAnchor.Col, moved.Row, moved.Col));
+        GridView.ScrollCellIntoView(moved.Row, moved.Col);
+    }
+
     /// <summary>찍은 칸의 참조를 식에 넣고 그 칸에 표시를 둔다.</summary>
     private void PointAt(CellRange range)
     {
         // 찍어 둔 참조는 커서가 아직 그 뒤에 붙어 있을 때만 갈아치운다.
         // 커서를 식 가운데로 옮겨 두었다면 그 자리에 새로 끼우는 것이 맞다.
-        bool replace = _pointStart >= 0 && Editor.CaretIndex == _pointStart + _pointLength;
+        bool replace = PointLive;
 
         (string text, int start, int length) = FormulaPoint.Put(
             Editor.Text, Editor.CaretIndex,
@@ -349,6 +396,7 @@ public partial class MainWindow : Window
         if (GridView.CellAt(p) is not { } at) return;
         CellRange grown = CellRange.Of(at.Sheet, _pointAnchor.Row, _pointAnchor.Col, at.Row, at.Col);
         if (GridView.PointRange is { } now && now == grown) return;
+        _pointCursor = at;                              // 끌기를 멈춘 칸에서 방향키가 이어 간다
         PointAt(grown);
     }
 
@@ -385,6 +433,16 @@ public partial class MainWindow : Window
                 break;
             case Key.Escape:
                 CancelEdit();
+                e.Handled = true;
+                break;
+            case Key.Up or Key.Down or Key.Left or Key.Right when CanPoint():
+                PointByArrow(Arrow(e.Key), (Keyboard.Modifiers & ModifierKeys.Shift) != 0);
+                e.Handled = true;
+                break;
+            case Key.F2:
+                // 10.6: 엑셀처럼 입력과 편집을 번갈아 바꾼다. 편집으로 바꾸면 방향키가 글자 사이를 오간다.
+                _inputMode = !_inputMode;
+                ClearPoint();
                 e.Handled = true;
                 break;
         }
@@ -470,7 +528,7 @@ public partial class MainWindow : Window
             case Key.F2:    BeginEdit(); e.Handled = true; return;
             case Key.Delete: ClearValues(); e.Handled = true; return;
             case Key.Escape: GridView.CopyMarquee = null; _copySource = null; GridView.InvalidateVisual(); e.Handled = true; return;
-            case Key.Back:  BeginEdit(); SetEditorText(""); e.Handled = true; return;
+            case Key.Back:  BeginEdit(inputMode: true); SetEditorText(""); e.Handled = true; return;
             case Key.PageDown: GridView.ScrollBy(GridView.VisibleRows, 0); e.Handled = true; return;
             case Key.PageUp:   GridView.ScrollBy(-GridView.VisibleRows, 0); e.Handled = true; return;
             default: return;

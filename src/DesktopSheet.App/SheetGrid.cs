@@ -93,17 +93,22 @@ public sealed class SheetGrid : FrameworkElement
     public int VisibleCols => Math.Max(1, (int)((ActualWidth - RowHeaderWidth) / CellWidth));
 
     /// <summary>커서가 보이는 범위를 벗어나면 화면이 따라간다(12.3).</summary>
-    public void ScrollIntoView()
+    public void ScrollIntoView() => ScrollCellIntoView(Selection.Cursor.Row, Selection.Cursor.Col);
+
+    /// <summary>10.6. 방향키로 찍은 칸을 화면 안으로 끌어들인다. 커서는 식을 치는 칸에 남아 있다.</summary>
+    public void ScrollCellIntoView(int row, int col)
     {
-        CellAddress c = Selection.Cursor;
-        if (c.Row < TopRow) TopRow = c.Row;
-        else if (c.Row >= TopRow + VisibleRows) TopRow = c.Row - VisibleRows + 1;
-        if (c.Col < LeftCol) LeftCol = c.Col;
-        else if (c.Col >= LeftCol + VisibleCols) LeftCol = c.Col - VisibleCols + 1;
+        int top = TopRow, left = LeftCol;
+
+        if (row < TopRow) TopRow = row;
+        else if (row >= TopRow + VisibleRows) TopRow = row - VisibleRows + 1;
+        if (col < LeftCol) LeftCol = col;
+        else if (col >= LeftCol + VisibleCols) LeftCol = col - VisibleCols + 1;
 
         TopRow = Math.Clamp(TopRow, 0, Math.Max(0, Sheet.Rows - VisibleRows));
         LeftCol = Math.Clamp(LeftCol, 0, Math.Max(0, Sheet.Cols - VisibleCols));
         InvalidateVisual();
+        if (TopRow != top || LeftCol != left) Scrolled?.Invoke(this, EventArgs.Empty);
     }
 
     public void ScrollBy(int rows, int cols)
