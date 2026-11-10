@@ -331,8 +331,7 @@ public partial class MainWindow : Window
     /// </summary>
     private void GridView_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (e.ClickCount == 1 && _editing && FormulaPoint.Accepts(Editor.Text, Editor.CaretIndex)
-            && GridView.CellAt(e.GetPosition(GridView)) is { } at)
+        if (e.ClickCount == 1 && CanPointAt() && GridView.CellAt(e.GetPosition(GridView)) is { } at)
         {
             _pointAnchor = at;
             _pointCursor = at;
@@ -355,13 +354,18 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 10.6. 입력 모드에서 식의 참조 자리에 커서가 있으면 방향키가 참조를 찍는다.
-    /// 이미 찍어 둔 참조가 살아 있으면 그 참조를 옮기는 것이므로 자리를 다시 따지지 않는다.
+    /// 10.6. 식의 참조 자리에 커서가 있으면 클릭이 참조를 찍는다. 모드는 따지지 않는다.
+    /// 이미 찍어 둔 참조가 살아 있으면 그 참조를 갈아치우는 것이므로 자리를 다시 따지지 않는다 -
+    /// 따지면 =A1 뒤는 참조 자리가 아니라서 두 번째 클릭이 식을 확정해 버린다.
     /// </summary>
+    private bool CanPointAt() =>
+        _editing && (PointLive || FormulaPoint.Accepts(Editor.Text, Editor.CaretIndex));
+
+    /// <summary>방향키는 입력 모드에서만 찍는다. 편집 모드에서는 글자 사이를 오간다.</summary>
     private bool CanPoint() =>
-        _editing && _inputMode
+        _inputMode
         && (Keyboard.Modifiers & ModifierKeys.Control) == 0   // Ctrl+방향키는 글자를 단어 단위로 건너뛰는 데 둔다
-        && (PointLive || FormulaPoint.Accepts(Editor.Text, Editor.CaretIndex));
+        && CanPointAt();
 
     /// <summary>찍어 둔 참조가 아직 커서 바로 앞에 붙어 있는가. 그래야 다음에 찍는 것이 그것을 갈아치운다.</summary>
     private bool PointLive => _pointStart >= 0 && Editor.CaretIndex == _pointStart + _pointLength;
