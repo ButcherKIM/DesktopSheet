@@ -1,0 +1,38 @@
+# 화면 시험. 윈도우 빌드 서버에서 실제 실행 파일을 띄우고 키와 마우스를 넣어 본다.
+# 장면마다 찍은 그림과 보고서를 남긴다. 릴리스는 만들지 않는다 - 그것은 build.yml 의 몫이다.
+name: 화면 시험
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - claude/amazing-lamport-yirb1l
+    paths:
+      - 'src/**'
+      - 'tools/DesktopSheet.UiCheck/**'
+      - '.github/workflows/ui-check.yml'
+
+jobs:
+  ui:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: 실행 파일 만들기 (릴리스와 같은 판)
+        run: dotnet publish src/DesktopSheet.App -c Release -o out/bundled --nologo
+
+      - name: 화면 시험
+        run: dotnet run --project tools/DesktopSheet.UiCheck -c Release -- out/bundled/DesktopSheet.exe ui-check
+
+      - name: 그림과 보고서 보관
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-check-${{ github.run_number }}
+          path: ui-check/

@@ -12,6 +12,7 @@ on:
       - 'src/**'
       - 'tests/**'
       - 'tools/**'
+      - '!tools/DesktopSheet.UiCheck/**'      # 화면 시험만 고친 것으로는 릴리스를 만들지 않는다
       - '.github/workflows/build.yml'
 
 permissions:
