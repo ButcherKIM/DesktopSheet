@@ -15,8 +15,7 @@
                             GlassFrameThickness="0" CornerRadius="0" UseAeroCaptionButtons="False" />
     </shell:WindowChrome.WindowChrome>
 
-    <!-- 테두리가 없으면 창이 바탕과 붙어 보여 얇은 선을 하나 두른다 -->
-    <Border BorderBrush="#8D96A3" BorderThickness="1" Background="White">
+    <Grid Background="White">
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="24" />
@@ -46,5 +45,9 @@
             </Grid>
         </Grid>
     </Grid>
-    </Border>
+    <!-- 테두리가 없으면 창이 바탕과 붙어 보여 얇은 선을 하나 두른다. 자리를 차지하게 두면 양쪽 1px 씩
+         모자라 다섯째 열과 스무째 행이 끝까지 안 보이고, 그 칸을 누르면 화면이 한 칸 밀린다.
+         그래서 스크롤바처럼 맨 위에 겹쳐 그린다(12.3). -->
+    <Border BorderBrush="#8D96A3" BorderThickness="1" IsHitTestVisible="False" />
+    </Grid>
 </Window>

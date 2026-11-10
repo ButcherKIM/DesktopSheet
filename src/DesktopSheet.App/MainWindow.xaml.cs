@@ -84,6 +84,7 @@ public partial class MainWindow : Window
 
         Editor.PreviewKeyDown += Editor_PreviewKeyDown;
         Editor.TextChanged += Editor_TextChanged;
+        Editor.TextChanged += (_, _) => PositionEditor();   // 글자가 늘면 편집기도 늘어난다(6장)
         Editor.LostKeyboardFocus += (_, _) => CommitEdit(MoveDirection.Down, move: false);
         PreviewKeyDown += Window_PreviewKeyDown;
         // 14.1: 창에는 닫기 단추가 없다. 밖에서 닫으라고 해도 숨기기만 하되, 종료할 때는 막지 않는다.
@@ -235,9 +236,27 @@ public partial class MainWindow : Window
         Editor.RenderTransform = SheetGrid.Squeeze == 1.0
             ? Transform.Identity
             : new ScaleTransform(SheetGrid.Squeeze, 1);
-        Editor.Width = r.Width / SheetGrid.Squeeze;
-        Editor.Height = r.Height;
         Editor.FontSize = SheetGrid.FontSize;
+        Editor.Width = EditorWidth(r) / SheetGrid.Squeeze;
+        Editor.Height = r.Height;
+    }
+
+    /// <summary>
+    /// 6장: 치는 동안 글자가 칸 폭을 넘으면 편집기가 오른쪽으로 늘어나 옆 칸을 덮는다. 창 오른쪽 끝에서 멈춘다.
+    /// 칸 폭에 묶어 두면 긴 식의 앞부분이 편집기 밖으로 밀려나 보이지 않는다.
+    /// </summary>
+    private double EditorWidth(Rect cell)
+    {
+        if (!_editing || Editor.Text.Length == 0) return cell.Width;
+
+        var face = new Typeface(Editor.FontFamily, Editor.FontStyle, Editor.FontWeight, Editor.FontStretch);
+        var ft = new FormattedText(Editor.Text, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
+                                   face, Editor.FontSize, Brushes.Black, VisualTreeHelper.GetDpi(Editor).PixelsPerDip);
+        // 글자 폭에 좌우 여백과 커서가 설 한 자리를 더한다.
+        double needed = ft.WidthIncludingTrailingWhitespace * SheetGrid.Squeeze
+                      + 2 * SheetGrid.CellPadding + SheetGrid.CharAdvance;
+        double room = GridView.ActualWidth - SheetGrid.ScrollBarWidth - cell.Left;
+        return Math.Max(cell.Width, Math.Min(needed, room));
     }
 
     private void FocusEditor()

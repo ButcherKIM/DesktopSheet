@@ -40,6 +40,19 @@ internal static class Program
 
     private static void Run(Driver d, Report r)
     {
+        // 맨 먼저 둔다. 이것이 깨지면 화면이 밀려 뒤의 장면이 모두 엉뚱한 칸을 누른다.
+        r.Scene("다섯째 열과 스무째 행을 눌러도 화면이 밀리지 않는다", () =>
+        {
+            d.Click(19, 4);                    // E20: 처음 창의 오른쪽 아래 칸
+            r.Shot(d.Shot("오른쪽-아래"), "E20 을 누른 모습. 열은 A~E, 행은 1~20 이 그대로 보여야 함");
+            d.Click(19, 3);                    // 화면이 밀렸으면 D20 자리에 E21 이 와 있다
+            d.Type("v");
+            d.Click(0, 0);
+            d.Settle();
+            r.Expect("D20", "v", d.Raw(19, 3));
+            d.ScrollHome();
+        });
+
         r.Scene("숫자를 치고 Enter 를 누르면 값이 들어가고 커서가 내려간다", () =>
         {
             d.Click(0, 0);
@@ -222,6 +235,16 @@ internal static class Program
             r.Expect("Sheet2 의 A15", null, d.Raw(14, 0, sheet: 1));
             r.Expect("보고 있는 시트", "1", d.Load().Window.Sheet.ToString());
             d.Click(d.Button("Sheet1"));
+        });
+
+        r.Scene("긴 식을 치면 편집기가 옆 칸으로 늘어난다", () =>
+        {
+            d.Click(17, 0);
+            d.Type("=SUM(A1:A3)+D1*2-C1");
+            r.Shot(d.Shot("긴-식"), "A18 에 열아홉 자짜리 식을 치는 중. 식 전체가 보여야 함");
+            d.Press(VK.Return);
+            d.Settle();
+            r.Expect("A18", "=SUM(A1:A3)+D1*2-C1", d.Raw(17, 0));
         });
 
         r.Scene("마지막 모습", () =>

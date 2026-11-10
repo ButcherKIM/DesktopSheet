@@ -17,8 +17,9 @@ namespace DesktopSheet.UiCheck;
 /// </summary>
 internal sealed class Driver : IDisposable
 {
-    // 창 안쪽 자리. 창 테두리 1px, 탭 줄 24px, 열 머리글 20px, 행 머리글 40px, 칸 104 x 20px (사양서 1장, 12.3).
-    private const double Border = 1, TabBar = 24, ColHeader = 20, RowHeader = 40, CellW = 104, CellH = 20;
+    // 창 안쪽 자리. 탭 줄 24px, 열 머리글 20px, 행 머리글 40px, 칸 104 x 20px (사양서 1장, 12.3).
+    // 창 테두리 1px 은 그리드 위에 겹쳐 그리므로 자리를 차지하지 않는다.
+    private const double Border = 0, TabBar = 24, ColHeader = 20, RowHeader = 40, CellW = 104, CellH = 20;
 
     private readonly Process _process;
     private readonly string _shots;
